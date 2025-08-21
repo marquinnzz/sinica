@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>🎱 Sinuca com Taco e Física Realista</title>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: #111;
+      margin: 0;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      background: #156;
+      border: 15px solid #3a1c00;
+      border-radius: 15px;
+      box-shadow: 0 0 30px #000;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="mesa" width="800" height="400"></canvas>
+  
+  <script>
+    const canvas = document.getElementById("mesa");
+    const ctx = canvas.getContext("2d");
+
+    const ballRadius = 12;
+    const friction = 0.99;
+    const pocketRadius = 22;
+
+    // Bolas
+    let balls = [];
+    function createBalls() {
+      balls = [{x: 200, y: 200, dx: 0, dy: 0, color: "white", isCue: true, mass:1}];
+      let colors = ["yellow","blue","red","purple","orange","green","brown","black"];
+      let startX = 500, startY = 200;
+      let idx = 0;
+      for (let row = 0; row < 5; row++) {
+        for (let col = 0; col <= row; col++) {
+          balls.push({
+            x: startX + row * (ballRadius*2 + 1),
+            y: startY - row * ballRadius + col * (ballRadius*2),
+            dx: 0, dy: 0,
+            color: colors[idx % colors.length],
+            isCue: false,
+            mass: 1
+          });
+          idx++;
+        }
+      }
+    }
+    createBalls();
+
+    // Caçapas
+    const pockets = [
+      {x: 0, y: 0}, 
+      {x: canvas.width/2, y: 0}, 
+      {x: canvas.width, y: 0}, 
+      {x: 0, y: canvas.height}, 
+      {x: canvas.width/2, y: canvas.height}, 
+      {x: canvas.width, y: canvas.height}, 
+    ];
+
+    // Controle taco
+    let aiming = false;
+    let mouseX, mouseY;
+    let dragPower = 0;
+
+    function drawBalls() {
+      for (let b of balls) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, ballRadius, 0, Math.PI * 2);
+        let gradient = ctx.createRadialGradient(b.x-4,b.y-4,5,b.x,b.y,ballRadius);
+        gradient.addColorStop(0,"#fff");
+        gradient.addColorStop(1,b.color);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        ctx.strokeStyle = "#000";
+        ctx.stroke();
+      }
+    }
+
+    function drawPockets() {
+      for (let p of pockets) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, pocketRadius, 0, Math.PI * 2);
+        ctx.fillStyle = "#000";
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#333";
+        ctx.stroke();
+      }
+    }
+
+    function moveBalls() {
+      for (let b of balls) {
+        b.x += b.dx;
+        b.y += b.dy;
+        b.dx *= friction;
+        b.dy *= friction;
+        if (Math.abs(b.dx) < 0.05) b.dx = 0;
+        if (Math.abs(b.dy) < 0.05) b.dy = 0;
+
+        // Rebote borda
+        if (b.x < ballRadius || b.x > canvas.width - ballRadius) {
+          b.dx *= -1;
+          b.x = Math.max(ballRadius, Math.min(b.x, canvas.width-ballRadius));
+        }
+        if (b.y < ballRadius || b.y > canvas.height - ballRadius) {
+          b.dy *= -1;
+          b.y = Math.max(ballRadius, Math.min(b.y, canvas.height-ballRadius));
+        }
+      }
+    }
+
+    // Colisão bola-bola
+    function checkCollisions() {
+      for (let i = 0; i < balls.length; i++) {
+        for (let j = i + 1; j < balls.length; j++) {
+          let a = balls[i], b = balls[j];
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < ballRadius * 2) {
+            let angle = Math.atan2(dy, dx);
+            let totalMass = a.mass + b.mass;
+
+            let v1 = (a.dx*Math.cos(angle)+a.dy*Math.sin(angle));
+            let v2 = (b.dx*Math.cos(angle)+b.dy*Math.sin(angle));
+
+            let newV1 = (v1*(a.mass-b.mass)+2*b.mass*v2)/totalMass;
+            let newV2 = (v2*(b.mass-a.mass)+2*a.mass*v1)/totalMass;
+
+            a.dx += (newV1-v1)*Math.cos(angle);
+            a.dy += (newV1-v1)*Math.sin(angle);
+            b.dx += (newV2-v2)*Math.cos(angle);
+            b.dy += (newV2-v2)*Math.sin(angle);
+
+            // Separação mínima
+            let overlap = (ballRadius*2 - dist)/2;
+            a.x -= overlap*Math.cos(angle);
+            a.y -= overlap*Math.sin(angle);
+            b.x += overlap*Math.cos(angle);
+            b.y += overlap*Math.sin(angle);
+          }
+        }
+      }
+    }
+
+    // Taco visível
+    function drawCue() {
+      let whiteBall = balls.find(b => b.isCue);
+      if (!whiteBall) return;
+
+      let angle = Math.atan2(mouseY - whiteBall.y, mouseX - whiteBall.x);
+      let length = 120;
+      let offset = aiming ? dragPower/5 : 0;
+
+      ctx.save();
+      ctx.translate(whiteBall.x, whiteBall.y);
+      ctx.rotate(angle + Math.PI);
+      ctx.fillStyle = "#c78a3a";
+      ctx.fillRect(-length-offset, -3, length, 6);
+      ctx.restore();
+
+      if (aiming) {
+        ctx.strokeStyle = "rgba(255,255,255,0.5)";
+        ctx.beginPath();
+        ctx.moveTo(whiteBall.x, whiteBall.y);
+        ctx.lineTo(mouseX, mouseY);
+        ctx.stroke();
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawPockets();
+      moveBalls();
+      checkCollisions();
+      drawBalls();
+      drawCue();
+      requestAnimationFrame(draw);
+    }
+    draw();
+
+    // Controle mouse
+    canvas.addEventListener("mousedown", (e) => {
+      aiming = true;
+      mouseX = e.offsetX;
+      mouseY = e.offsetY;
+    });
+    canvas.addEventListener("mousemove", (e) => {
+      mouseX = e.offsetX;
+      mouseY = e.offsetY;
+      if (aiming) {
+        let whiteBall = balls.find(b => b.isCue);
+        let dx = whiteBall.x - mouseX;
+        let dy = whiteBall.y - mouseY;
+        dragPower = Math.sqrt(dx*dx+dy*dy);
+      }
+    });
+    canvas.addEventListener("mouseup", (e) => {
+      if (aiming) {
+        let whiteBall = balls.find(b => b.isCue);
+        let dx = whiteBall.x - e.offsetX;
+        let dy = whiteBall.y - e.offsetY;
+        whiteBall.dx = dx * 0.05;
+        whiteBall.dy = dy * 0.05;
+        aiming = false;
+        dragPower = 0;
+      }
+    });
+  </script>
+</body>
+</html>
