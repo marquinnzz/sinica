@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Sinuca 8-Ball</title>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: #222;
+      margin: 0;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    #placar {
+      margin-bottom: 10px;
+      font-size: 18px;
+      text-align: center;
+    }
+    canvas {
+      background: #7b1b1b;
+      border: 15px solid #3a1c00;
+      border-radius: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div id="placar">
+    🎱 <b>Jogador 1 (Lisas):</b> <span id="p1">0</span> | 
+    <b>Jogador 2 (Listradas):</b> <span id="p2">0</span> 
+    <br>
+    👉 Vez: <span id="turno">Jogador 1</span>
+    <br>
+    <span id="status"></span>
+  </div>
+
+  <canvas id="mesa" width="800" height="400"></canvas>
+  
+  <script>
+    const canvas = document.getElementById("mesa");
+    const ctx = canvas.getContext("2d");
+
+    const friction = 0.99;
+    const ballRadius = 12;
+    const pocketRadius = 20;
+
+    // Jogadores
+    let currentPlayer = 1;
+    let scores = {1: 0, 2: 0};
+    let assigned = {1: null, 2: null}; // "lisas" ou "listradas"
+    let bolaEncaixada = false;
+    let jogoAcabou = false;
+
+    const placarP1 = document.getElementById("p1");
+    const placarP2 = document.getElementById("p2");
+    const turno = document.getElementById("turno");
+    const status = document.getElementById("status");
+
+    // Criar bolas
+    let balls = [];
+    function createBalls() {
+      balls = [{x: 200, y: 200, dx: 0, dy: 0, color: "white", isCue: true, num: 0}]; // bola branca
+
+      let colors = [
+        "yellow","blue","red","purple","orange","green","brown", // 1-7 lisas
+        "black", // 8
+        "yellow","blue","red","purple","orange","green","brown"  // 9-15 listradas
+      ];
+
+      let startX = 500, startY = 200;
+      let idx = 1;
+      for (let row = 0; row < 5; row++) {
+        for (let col = 0; col <= row; col++) {
+          balls.push({
+            x: startX + row * (ballRadius*2 + 1),
+            y: startY - row * ballRadius + col * (ballRadius*2),
+            dx: 0, dy: 0,
+            color: colors[idx-1],
+            num: idx
+          });
+          idx++;
+        }
+      }
+    }
+    createBalls();
+
+    // Caçapas
+    const pockets = [
+      {x: 0, y: 0}, 
+      {x: canvas.width/2, y: 0}, 
+      {x: canvas.width, y: 0}, 
+      {x: 0, y: canvas.height}, 
+      {x: canvas.width/2, y: canvas.height}, 
+      {x: canvas.width, y: canvas.height}, 
+    ];
+
+    // Taco
+    let aiming = false;
+    let mouseX, mouseY;
+
+    function drawBalls() {
+      for (let b of balls) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, ballRadius, 0, Math.PI * 2);
+        ctx.fillStyle = b.color;
+        ctx.fill();
+        ctx.strokeStyle = "#000";
+        ctx.stroke();
+
+        if (b.num > 8) { // listrada → desenhar faixa
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, ballRadius*0.6, 0, Math.PI * 2);
+          ctx.fillStyle = "#fff";
+          ctx.fill();
+        }
+        if (b.num > 0) { // número
+          ctx.fillStyle = "black";
+          ctx.font = "10px Arial";
+          ctx.textAlign = "center";
+          ctx.fillText(b.num, b.x, b.y+3);
+        }
+      }
+    }
+
+    function drawPockets() {
+      for (let p of pockets) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, pocketRadius, 0, Math.PI * 2);
+        ctx.fillStyle = "#000";
+        ctx.fill();
+      }
+    }
+
+    function moveBalls() {
+      for (let b of balls) {
+        b.x += b.dx;
+        b.y += b.dy;
+
+        b.dx *= friction;
+        b.dy *= friction;
+
+        if (Math.abs(b.dx) < 0.05) b.dx = 0;
+        if (Math.abs(b.dy) < 0.05) b.dy = 0;
+
+        if (b.x < ballRadius || b.x > canvas.width - ballRadius) b.dx *= -1;
+        if (b.y < ballRadius || b.y > canvas.height - ballRadius) b.dy *= -1;
+      }
+    }
+
+    function checkCollisions() {
+      for (let i = 0; i < balls.length; i++) {
+        for (let j = i + 1; j < balls.length; j++) {
+          let a = balls[i], b = balls[j];
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < ballRadius * 2) {
+            let tempDx = a.dx, tempDy = a.dy;
+            a.dx = b.dx; a.dy = b.dy;
+            b.dx = tempDx; b.dy = tempDy;
+          }
+        }
+      }
+    }
+
+    function checkPockets() {
+      bolaEncaixada = false;
+      for (let b of balls.slice()) {
+        for (let p of pockets) {
+          let dx = b.x - p.x;
+          let dy = b.y - p.y;
+          let dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < pocketRadius) {
+            if (b.isCue) {
+              b.x = 200;
+              b.y = 200;
+              b.dx = 0;
+              b.dy = 0;
+            } else {
+              handlePocket(b);
+              balls = balls.filter(ball => ball !== b);
+            }
+          }
+        }
+      }
+    }
+
+    function handlePocket(b) {
+      if (jogoAcabou) return;
+
+      if (b.num === 8) {
+        if (scores[currentPlayer] === 7) {
+          status.textContent = "🎉 Jogador " + currentPlayer + " venceu!";
+        } else {
+          status.textContent = "❌ Jogador " + currentPlayer + " perdeu (encaçapou a 8 antes da hora)!";
+        }
+        jogoAcabou = true;
+        return;
+      }
+
+      let tipo = b.num <= 7 ? "lisas" : "listradas";
+
+      if (assigned[1] === null && assigned[2] === null) {
+        assigned[currentPlayer] = tipo;
+        assigned[currentPlayer === 1 ? 2 : 1] = tipo === "lisas" ? "listradas" : "lisas";
+        status.textContent = "🎱 Jogador " + currentPlayer + " ficou com " + tipo;
+      }
+
+      if (assigned[currentPlayer] === tipo) {
+        scores[currentPlayer]++;
+        bolaEncaixada = true;
+        updateScore();
+      } else {
+        bolaEncaixada = false;
+      }
+    }
+
+    function updateScore() {
+      placarP1.textContent = scores[1];
+      placarP2.textContent = scores[2];
+    }
+
+    function changeTurn() {
+      currentPlayer = currentPlayer === 1 ? 2 : 1;
+      turno.textContent = "Jogador " + currentPlayer;
+    }
+
+    function ballsMoving() {
+      return balls.some(b => Math.abs(b.dx) > 0.05 || Math.abs(b.dy) > 0.05);
+    }
+
+    function drawCue() {
+      let whiteBall = balls.find(b => b.isCue);
+      if (aiming && whiteBall) {
+        ctx.beginPath();
+        ctx.moveTo(whiteBall.x, whiteBall.y);
+        ctx.lineTo(mouseX, mouseY);
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawPockets();
+      moveBalls();
+      checkCollisions();
+      checkPockets();
+      drawBalls();
+      drawCue();
+
+      if (!ballsMoving() && !aiming && !jogoAcabou) {
+        if (!bolaEncaixada) {
+          changeTurn();
+        }
+      }
+
+      requestAnimationFrame(draw);
+    }
+    draw();
+
+    // Mouse
+    canvas.addEventListener("mousedown", (e) => {
+      if (jogoAcabou) return;
+      aiming = true;
+      mouseX = e.offsetX;
+      mouseY = e.offsetY;
+    });
+
+    canvas.addEventListener("mousemove", (e) => {
+      if (aiming) {
+        mouseX = e.offsetX;
+        mouseY = e.offsetY;
+      }
+    });
+
+    canvas.addEventListener("mouseup", (e) => {
+      if (aiming) {
+        let whiteBall = balls.find(b => b.isCue);
+        let dx = whiteBall.x - e.offsetX;
+        let dy = whiteBall.y - e.offsetY;
+        whiteBall.dx = dx * 0.1;
+        whiteBall.dy = dy * 0.1;
+        aiming = false;
+      }
+    });
+  </script>
+</body>
+</html>
